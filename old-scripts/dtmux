@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+#
+# dtmux - Distributed Tmux Helper
+# Manage tmux sessions across your distributed dev environment
+#
+
+set -euo pipefail
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+dtmux - Distributed Tmux Management
+
+USAGE:
+    dtmux <command> [options]
+
+COMMANDS:
+    list                List tmux sessions on all machines
+    attach <host>       Attach to tmux on specific machine
+    new <host> <name>   Create new tmux session on machine
+    sync <session>      Sync current directory to machine and attach
+    multi               Create synchronized multi-machine view
+    monitor             Monitor all machines in split panes
+
+EXAMPLES:
+    # List all tmux sessions across machines
+    dtmux list
+
+    # Attach to homelab
+    dtmux attach homelab
+
+    # Create new session on homelab
+    dtmux new homelab dev-session
+
+    # Sync current project and attach to homelab
+    dtmux sync homelab
+
+    # Create multi-machine monitoring view
+    dtmux monitor
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+# List tmux sessions on all machines
+cmd_list() {
+    local hosts=("homelab" "sonia-mac")
+
+    echo -e "${BLUE}Tmux Sessions Across Machines${NC}"
+    echo ""
+
+    for host in "${hosts[@]}"; do
+        echo -e "${CYAN}=== $host ===${NC}"
+
+        if ! ssh -o ConnectTimeout=2 "$host" exit 2>/dev/null; then
+            echo -e "${RED}  OFFLINE${NC}"
+            echo ""
+            continue
+        fi
+
+        local sessions
+        sessions=$(ssh "$host" "tmux list-sessions 2>/dev/null" || echo "  No sessions")
+        echo "$sessions"
+        echo ""
+    done
+}
+
+# Attach to tmux on specific machine
+cmd_attach() {
+    local host="$1"
+    local session="${2:-}"
+
+    info "Connecting to $host..."
+
+    if [[ -n "$session" ]]; then
+        ssh -t "$host" "TERM=xterm-256color tmux attach-session -t $session"
+    else
+        # Attach to most recent session or create new one
+        ssh -t "$host" "TERM=xterm-256color tmux attach-session || TERM=xterm-256color tmux new-session"
+    fi
+}
+
+# Create new tmux session on machine
+cmd_new() {
+    local host="$1"
+    local session="${2:-dev}"
+
+    info "Creating session '$session' on $host..."
+    ssh -t "$host" "TERM=xterm-256color tmux new-session -s $session"
+}
+
+# Sync current directory and attach
+cmd_sync() {
+    local host="$1"
+    local session="${2:-dev}"
+    local current_dir="$PWD"
+
+    info "Syncing $current_dir to $host..."
+
+    # Use dsync to push current directory
+    "$(dirname "$0")/dsync" push "$current_dir" --host "$host"
+
+    success "Sync complete!"
+    info "Attaching to $host..."
+
+    # Attach to tmux session, creating if needed
+    ssh -t "$host" "cd ${current_dir/$HOME/\~} && (TERM=xterm-256color tmux attach-session -t $session 2>/dev/null || TERM=xterm-256color tmux new-session -s $session)"
+}
+
+# Create multi-machine monitoring view
+cmd_monitor() {
+    local hosts=("homelab" "sonia-mac")
+    local session_name="distributed-monitor"
+
+    info "Creating distributed monitoring view..."
+
+    # Create new tmux session
+    tmux new-session -d -s "$session_name" -n "monitor"
+
+    # Split into panes for each machine
+    local pane=0
+    for host in "${hosts[@]}"; do
+        if [[ $pane -gt 0 ]]; then
+            tmux split-window -t "$session_name:monitor" -h
+            tmux select-layout -t "$session_name:monitor" tiled
+        fi
+
+        # Send monitoring command to pane
+        tmux send-keys -t "$session_name:monitor.$pane" \
+            "ssh $host 'echo \"=== $host ===\"' && ssh $host 'watch -n 2 \"echo && uptime && echo && free -h 2>/dev/null || vm_stat\"'" C-m
+
+        ((pane++))
+    done
+
+    # Attach to the session
+    tmux select-layout -t "$session_name:monitor" tiled
+    tmux attach-session -t "$session_name"
+}
+
+# Parse command
+if [[ $# -eq 0 ]]; then
+    usage
+    exit 0
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    list)
+        cmd_list
+        ;;
+    attach)
+        cmd_attach "$@"
+        ;;
+    new)
+        cmd_new "$@"
+        ;;
+    sync)
+        cmd_sync "$@"
+        ;;
+    monitor)
+        cmd_monitor
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        usage
+        exit 1
+        ;;
+esac

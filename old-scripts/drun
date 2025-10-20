@@ -1,0 +1,341 @@
+#!/usr/bin/env bash
+#
+# drun - Distributed Run Tool
+# Execute commands on the best available machine based on load
+#
+
+set -euo pipefail
+
+# Colors
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+drun - Distributed Command Execution
+
+USAGE:
+    drun [options] <command>
+
+OPTIONS:
+    -a, --all           Run on all machines in parallel
+    -g, --group <name>  Run on specific group (default: dev)
+    -h, --host <name>   Run on specific host
+    -b, --best          Run on least loaded machine (default)
+    -s, --show-load     Show current load across machines
+    -d, --dry-run       Show where command would run
+    -t, --timeout <sec> Command timeout (default: 60)
+
+EXAMPLES:
+    # Run on best available machine
+    drun npm run build
+
+    # Run on all dev machines in parallel
+    drun --all "git pull && npm install"
+
+    # Run on specific machine
+    drun --host homelab "docker compose up -d"
+
+    # Run on high-compute group
+    drun --group high-compute "python train_model.py"
+
+    # Show current load
+    drun --show-load
+
+    # Check where command would run (dry run)
+    drun --best --dry-run "npm run build"
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+# Get load metrics from a machine
+get_load_metrics() {
+    local host="$1"
+
+    # Get load average, memory usage, and CPU info
+    local metrics
+    metrics=$(ssh "$host" '
+        # CPU load (1 min average) - handle both macOS and Linux formats
+        load=$(uptime | sed "s/.*load average[s]*: //" | awk "{print \$1}" | tr -d ",")
+
+        # Number of CPUs
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            cpus=$(sysctl -n hw.ncpu)
+            mem_total=$(sysctl -n hw.memsize)
+            mem_free=$(vm_stat | grep "Pages free" | awk "{print \$3}" | tr -d ".")
+            page_size=$(vm_stat | grep "page size" | awk "{print \$8}")
+            mem_used=$((mem_total - (mem_free * page_size)))
+            mem_pct=$((mem_used * 100 / mem_total))
+        else
+            cpus=$(nproc)
+            mem_info=$(free | grep Mem)
+            mem_total=$(echo "$mem_info" | awk "{print \$2}")
+            mem_used=$(echo "$mem_info" | awk "{print \$3}")
+            mem_pct=$((mem_used * 100 / mem_total))
+        fi
+
+        # Calculate load percentage (load / cpus * 100)
+        cpu_pct=$(awk "BEGIN {printf \"%.0f\", ($load / $cpus) * 100}")
+
+        # Composite score (lower is better)
+        score=$(awk "BEGIN {printf \"%.2f\", ($cpu_pct * 0.7) + ($mem_pct * 0.3)}")
+
+        # Get actual hostname from the machine
+        hostname=$(hostname)
+
+        echo "$hostname|$load|$cpus|$cpu_pct|$mem_pct|$score"
+    ' 2>/dev/null)
+
+    echo "$metrics"
+}
+
+# Show load across all machines
+show_load() {
+    info "Checking load across development machines..."
+    echo ""
+
+    printf "%-20s %-12s %-8s %-10s %-10s %-10s\n" "Machine" "Load Avg" "CPUs" "CPU %" "Memory %" "Score"
+    printf "%-20s %-12s %-8s %-10s %-10s %-10s\n" "--------" "--------" "----" "------" "---------" "-----"
+
+    local hosts=("homelab" "sonia-mac")
+    local best_host=""
+    local best_score=999999
+
+    for host in "${hosts[@]}"; do
+        # Check if host is reachable
+        if ! ssh -o ConnectTimeout=2 -o BatchMode=yes "$host" exit 2>/dev/null; then
+            printf "%-20s ${RED}%-12s${NC}\n" "$host" "OFFLINE"
+            continue
+        fi
+
+        local metrics
+        metrics=$(get_load_metrics "$host")
+
+        if [[ -z "$metrics" ]]; then
+            printf "%-20s ${RED}%-12s${NC}\n" "$host" "ERROR"
+            continue
+        fi
+
+        IFS='|' read -r hostname load cpus cpu_pct mem_pct score <<< "$metrics"
+
+        # Skip if any value is empty
+        if [[ -z "$score" || -z "$cpu_pct" || -z "$mem_pct" ]]; then
+            printf "%-20s ${RED}%-12s${NC}\n" "$host" "ERROR"
+            continue
+        fi
+
+        # Color code based on score (use bc for float comparison)
+        local color="$GREEN"
+        if (( $(echo "$score > 50" | bc -l 2>/dev/null || echo 0) )); then
+            color="$YELLOW"
+        fi
+        if (( $(echo "$score > 80" | bc -l 2>/dev/null || echo 0) )); then
+            color="$RED"
+        fi
+
+        printf "%-20s %-12s %-8s ${color}%-10s %-10s %-10s${NC}\n" \
+            "$hostname" "$load" "$cpus" "${cpu_pct}%" "${mem_pct}%" "$score"
+
+        # Track best machine (use bc for float comparison)
+        if (( $(echo "$score < $best_score" | bc -l 2>/dev/null || echo 0) )); then
+            best_score="$score"
+            best_host="$hostname"
+        fi
+    done
+
+    echo ""
+    if [[ -n "$best_host" ]]; then
+        success "Best machine: $best_host (score: $best_score)"
+    fi
+}
+
+# Find the best machine to run on
+find_best_machine() {
+    local hosts=("homelab" "sonia-mac")
+    local best_host=""
+    local best_score=999999
+
+    for host in "${hosts[@]}"; do
+        # Check if host is reachable
+        if ! ssh -o ConnectTimeout=2 -o BatchMode=yes "$host" exit 2>/dev/null; then
+            continue
+        fi
+
+        local metrics
+        metrics=$(get_load_metrics "$host")
+
+        if [[ -z "$metrics" ]]; then
+            continue
+        fi
+
+        IFS='|' read -r hostname load cpus cpu_pct mem_pct score <<< "$metrics"
+
+        # Skip if score is empty
+        if [[ -z "$score" ]]; then
+            continue
+        fi
+
+        # Compare scores using bc for float comparison
+        if (( $(echo "$score < $best_score" | bc -l 2>/dev/null || echo 0) )); then
+            best_score="$score"
+            best_host="$hostname"
+        fi
+    done
+
+    if [[ -z "$best_host" ]]; then
+        error "No machines available"
+    fi
+
+    echo "$best_host"
+}
+
+# Run command on best machine
+run_on_best() {
+    local command="$1"
+    local dry_run="${2:-false}"
+
+    info "Finding best machine..."
+    local best_host
+    best_host=$(find_best_machine)
+
+    local metrics
+    metrics=$(get_load_metrics "$best_host")
+    IFS='|' read -r hostname load cpus cpu_pct mem_pct score <<< "$metrics"
+
+    success "Selected: $best_host (CPU: ${cpu_pct}%, Memory: ${mem_pct}%, Score: $score)"
+
+    if [[ "$dry_run" == "true" ]]; then
+        info "DRY RUN - Command would execute on: $best_host"
+        echo -e "${CYAN}Command: $command${NC}"
+        return 0
+    fi
+
+    echo ""
+    info "Executing on $best_host..."
+    echo -e "${CYAN}$ $command${NC}"
+    echo ""
+
+    ssh "$best_host" "$command"
+    local exit_code=$?
+
+    echo ""
+    if [[ $exit_code -eq 0 ]]; then
+        success "Command completed successfully on $best_host"
+    else
+        error "Command failed on $best_host (exit code: $exit_code)"
+    fi
+
+    return $exit_code
+}
+
+# Run command on all machines in parallel
+run_on_all() {
+    local command="$1"
+    local group="${2:-dev}"
+
+    info "Running on all machines in group: $group"
+    echo ""
+
+    sshsync group "$group" "$command"
+}
+
+# Run on specific host
+run_on_host() {
+    local host="$1"
+    local command="$2"
+
+    info "Running on: $host"
+    echo -e "${CYAN}$ $command${NC}"
+    echo ""
+
+    ssh "$host" "$command"
+}
+
+# Parse arguments
+MODE="best"
+GROUP="dev"
+HOST=""
+DRY_RUN="false"
+TIMEOUT=60
+COMMAND=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -a|--all)
+            MODE="all"
+            shift
+            ;;
+        -g|--group)
+            GROUP="$2"
+            shift 2
+            ;;
+        -h|--host)
+            MODE="host"
+            HOST="$2"
+            shift 2
+            ;;
+        -b|--best)
+            MODE="best"
+            shift
+            ;;
+        -s|--show-load)
+            show_load
+            exit 0
+            ;;
+        -d|--dry-run)
+            DRY_RUN="true"
+            shift
+            ;;
+        -t|--timeout)
+            TIMEOUT="$2"
+            shift 2
+            ;;
+        --help)
+            usage
+            exit 0
+            ;;
+        *)
+            COMMAND="$*"
+            break
+            ;;
+    esac
+done
+
+if [[ -z "$COMMAND" ]]; then
+    usage
+    exit 1
+fi
+
+# Execute based on mode
+case "$MODE" in
+    best)
+        run_on_best "$COMMAND" "$DRY_RUN"
+        ;;
+    all)
+        run_on_all "$COMMAND" "$GROUP"
+        ;;
+    host)
+        run_on_host "$HOST" "$COMMAND"
+        ;;
+esac
