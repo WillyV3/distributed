@@ -1,332 +1,152 @@
-# d - Distributed Development CLI
+# distributed
 
-Pure Unix. One binary. No bullshit.
+Distribute workload across Tailscale-connected machines with intelligent load balancing.
 
-Manage distributed development across multiple machines using SSH, rsync, and tmux.
+## The Problem
 
-## Philosophy
+Development on a MacBook Pro maxes out resources. I have a Linux homelab and another MacBook on my Tailscale network sitting idle. I needed a way to offload builds, tests, and heavy workloads to whichever machine has capacity.
 
-- **Use existing tools**: SSH, rsync, tmux - no reinventing
-- **Read from standards**: Parses `~/.ssh/config` automatically
-- **Minimal dependencies**: Just Go stdlib + cobra + yaml
-- **Secure**: Never executes untrusted code, uses SSH properly
-- **Simple**: One command, clear subcommands
+## The Solution
+
+CLI that reads your SSH config, checks machine load, and distributes work intelligently.
+
+- Finds the least-loaded machine automatically
+- Syncs files via rsync
+- Runs commands over SSH
+- Opens tmux sessions on remote machines
+
+Pure Unix tools. No daemons, no APIs, no complexity.
 
 ## Installation
 
 ```bash
-cd ~/distributed
-go install ./cmd/d
+brew install willyv3/tap/distributed
 ```
 
-**Note**: If you have a shell function `d()`, you can:
-- Use full path: `~/go/bin/d`
-- Create alias: `alias dist='~/go/bin/d'`
-- Remove the function from your shell config
-
-## Quick Start
-
-### 1. Initialize Config
+Or from source:
 ```bash
-d config init
+git clone https://github.com/WillyV3/distributed.git
+cd distributed
+go install ./cmd/dw
 ```
 
-This reads `~/.ssh/config` and creates `~/.config/distributed/config.yaml` with all hosts in a "dev" group.
+## Usage
 
-### 2. Check Status
 ```bash
-d status
+dw status              # Check which hosts are online
+dw load                # Show CPU/memory load across hosts
+dw sync .              # Sync current directory to remote hosts
+dw run go build        # Run command on least-loaded machine
+dw tmux homelab        # Open tmux session with synced files
 ```
-
-Shows which machines are online.
-
-### 3. Check Load
-```bash
-d load
-```
-
-Shows CPU, memory, and load scores. Lower score = better for running tasks.
-
-### 4. Sync Files
-```bash
-# Sync current directory to all machines in dev group
-d sync .
-
-# Sync to specific host
-d sync ~/projects/myapp --host homelab
-
-# Dry run (see what would sync)
-d sync . --dry-run
-```
-
-### 5. Run Commands
-```bash
-# Run on best (least loaded) machine
-d run go build
-
-# Run on all machines
-d run --all "uname -a"
-
-# Run on specific host
-d run --host homelab "docker ps"
-```
-
-### 6. Tmux Integration
-```bash
-# Sync current directory and attach to tmux on homelab
-d tmux homelab
-
-# Inside tmux, you're in the same directory path
-# Files are already synced
-# Work as if local
-```
-
-## Commands
-
-### `d status`
-Show status of all hosts from SSH config.
-
-### `d load`
-Display load metrics across all hosts. Arrow (←) indicates best machine.
-
-### `d sync [path]`
-Sync directory to remote hosts using rsync.
-
-**Flags:**
-- `--dry-run` - Show what would be synced
-- `--host <name>` - Sync to specific host
-- `-g, --group <name>` - Sync to specific group (default: "dev")
-
-**Auto-excludes:**
-- `.git`, `node_modules`, `.DS_Store`
-- `*.pyc`, `__pycache__`, `.venv`, `venv`
-- `dist`, `build`, `.next`, `target`, `.terraform`
-
-### `d run [command]`
-Execute command on best available machine (or all machines).
-
-**Flags:**
-- `--all` - Run on all machines in parallel
-- `--host <name>` - Run on specific host
-- `-g, --group <name>` - Target specific group
-
-**Examples:**
-```bash
-d run npm test                    # Runs on least-loaded machine
-d run --all "git pull"           # Runs on all machines
-d run --host homelab go build    # Runs on homelab specifically
-```
-
-### `d tmux [host]`
-Sync current directory and attach to tmux session.
-
-**What it does:**
-1. Syncs current directory to remote host
-2. SSHes to host
-3. CDs to same directory path
-4. Attaches to tmux (or creates new session)
-
-**Example:**
-```bash
-# You're in ~/projects/vinw on Mac
-pwd  # /Users/you/projects/vinw
-
-d tmux homelab
-
-# Now in tmux on homelab, at ~/projects/vinw
-# Files are synced
-# Ready to build/test
-```
-
-### `d config`
-Manage configuration.
-
-**Subcommands:**
-- `d config init` - Create default config from SSH config
-- `d config show` - Display current configuration
 
 ## Configuration
 
-### SSH Config (`~/.ssh/config`)
-`d` reads this automatically. Example:
+Reads from `~/.ssh/config` automatically:
 
-```ssh-config
+```
 Host homelab
   HostName 100.72.192.70
   User wv3
 
 Host build-server
-  HostName build.example.com
-  User deploy
-  Port 2222
+  HostName 192.168.1.100
+  User admin
 ```
 
-### d Config (`~/.config/distributed/config.yaml`)
-Groups for targeting multiple hosts:
+Optional groups at `~/.config/distributed/config.yaml`:
 
 ```yaml
 groups:
   dev:
     - homelab
     - build-server
-  production:
-    - prod-web-01
-    - prod-web-02
 ```
 
-Use groups with `-g, --group` flag:
+## Commands
+
+### dw status
+Check reachability of all SSH hosts.
+
+### dw load
+Display load metrics. Score = (CPU% × 0.7) + (Memory% × 0.3). Lower is better.
+
+### dw sync [path]
+Sync directory to remote hosts using rsync.
+
+Flags:
+- `--dry-run` - Preview what would sync
+- `--host <name>` - Target specific host
+- `-g, --group <name>` - Target group (default: dev)
+
+Auto-excludes: .git, node_modules, dist, build, .DS_Store, __pycache__
+
+### dw run [command]
+Execute command on best available machine or all machines.
+
+Flags:
+- `--all` - Run on all machines in parallel
+- `--host <name>` - Target specific host
+- `-g, --group <name>` - Target group
+
+Examples:
 ```bash
-d sync . --group production
-d run --group production "systemctl restart app"
+dw run npm test                   # Runs on least-loaded machine
+dw run --all "git pull"           # Runs on all machines
+dw run --host homelab go build    # Runs on specific host
+```
+
+### dw tmux [host]
+Sync current directory and attach to tmux session on remote host.
+
+Example:
+```bash
+cd ~/projects/myapp
+dw tmux homelab
+# Now in tmux on homelab at ~/projects/myapp
+# Files already synced, ready to work
 ```
 
 ## Examples
 
-### Heavy Go Build
+Heavy build:
 ```bash
 cd ~/projects/myapp
-d sync .
-d run go build -o myapp
+dw sync .
+dw run go build
 ```
 
-`d` automatically picks the least-loaded machine.
-
-### Parallel Testing
+Parallel testing:
 ```bash
-d sync ~/projects/myapp
-d run --all "cd ~/projects/myapp && go test ./..."
+dw sync ~/projects/myapp
+dw run --all "cd ~/projects/myapp && go test ./..."
 ```
 
-Runs tests on all machines simultaneously.
-
-### Remote Development
+Remote development:
 ```bash
 cd ~/projects/vinw
-d tmux homelab
-
-# Now in tmux on homelab
-go run .
-# Edit locally, files sync automatically if using watch mode
+dw tmux homelab
 ```
 
-### Development with Watch Mode
-```bash
-# Terminal 1: Manual sync when needed
-d sync .
+## Requirements
 
-# Terminal 2: Work on homelab
-d tmux homelab
-```
+Local machine:
+- SSH client
+- rsync
+- tmux (optional, for tmux command)
 
-Or use `fswatch` for auto-sync:
-```bash
-# Terminal 1: Auto-sync on changes
-fswatch -o . | xargs -n1 -I{} d sync .
-
-# Terminal 2: Work remotely
-d tmux homelab
-```
+Remote machines:
+- SSH server
+- rsync
+- tmux (optional)
 
 ## Security
 
-- **No arbitrary code execution**: Commands are passed directly to SSH
-- **Uses SSH authentication**: Respects `~/.ssh/config` and keys
-- **No exposed services**: Everything over SSH tunnel
-- **Input validation**: Host names and paths validated before use
-- **No secrets in code**: Uses SSH agent for key management
-
-## Dependencies
-
-**Required on local machine:**
-- Go 1.21+ (for building)
-- SSH client
-- rsync
-
-**Optional:**
-- tmux (for `d tmux` command)
-- fswatch (for auto-sync workflows)
-
-**Go dependencies:**
-- `github.com/spf13/cobra` - CLI framework
-- `gopkg.in/yaml.v3` - YAML config parsing
-
-## Workflows
-
-### Workflow: Release Build
-```bash
-cd ~/projects/myapp
-d sync .
-d load  # Check which machine is best
-d run goreleaser build --snapshot
-```
-
-### Workflow: Distributed Testing
-```bash
-d sync ~/projects/myapp
-d run --all "cd ~/projects/myapp && make test"
-```
-
-### Workflow: Remote Dev Session
-```bash
-cd ~/projects/vinw
-d tmux homelab
-# Now in tmux on homelab, same directory
-# Detach: Ctrl+B, D
-# Reattach later: d tmux homelab
-```
-
-## Troubleshooting
-
-### `d: command not found`
-Binary is in `~/go/bin/d`. Either:
-- Add `~/go/bin` to PATH: `export PATH=$PATH:~/go/bin`
-- Use full path: `~/go/bin/d`
-- Create alias: `alias dist='~/go/bin/d'`
-
-### Shell function `d` conflicts
-You might have a `d()` function (dir stack). Either:
-- Rename shell function
-- Use full path to binary
-- Create alias with different name
-
-### Host unreachable
-- Check SSH config: `cat ~/.ssh/config`
-- Test SSH manually: `ssh <host>`
-- Verify Tailscale: `tailscale status`
-
-### Sync fails
-- Ensure rsync is installed on both machines
-- Check file permissions
-- Try dry-run first: `d sync . --dry-run`
-
-## Why This vs Scripts?
-
-**Old way (bash scripts):**
-- Multiple commands: `dsync`, `drun`, `dtmux`
-- Shell scripts, not portable
-- Dependencies on `sshsync`, custom tools
-- Hardcoded host names
-
-**New way (d CLI):**
-- One command: `d`
-- Go binary, runs anywhere
-- Uses standard tools: SSH, rsync
-- Reads from `~/.ssh/config`
-
-## Contributing
-
-This is a personal tool but feel free to fork and modify.
-
-Principles:
-- Keep it simple
-- Use Unix tools
-- No unnecessary dependencies
-- Secure by default
+- No arbitrary code execution
+- Uses SSH authentication from ~/.ssh/config
+- No exposed services, everything over SSH
+- No secrets in code, uses SSH agent
 
 ## License
 
 MIT
-
----
-
-**Built with Unix philosophy: Do one thing well.**

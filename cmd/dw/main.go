@@ -25,7 +25,7 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "d",
+		Use:   "dw",
 		Short: "Distributed development across machines",
 		Long:  "Manage distributed development across multiple machines using SSH and rsync",
 	}

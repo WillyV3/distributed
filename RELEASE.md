@@ -45,17 +45,17 @@ Location: `scripts/release.sh`
 ```bash
 git clone https://github.com/WillyV3/distributed.git
 cd distributed
-go install ./cmd/d
+go install ./cmd/dw
 ```
 
 ### From Release
 ```bash
-go install github.com/WillyV3/distributed/cmd/d@latest
+go install github.com/WillyV3/distributed/cmd/dw@latest
 ```
 
 ### From Specific Version
 ```bash
-go install github.com/WillyV3/distributed/cmd/d@v0.0.1
+go install github.com/WillyV3/distributed/cmd/dw@v0.0.1
 ```
 
 ## First Release Created

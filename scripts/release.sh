@@ -172,8 +172,8 @@ main() {
     echo ""
 
     # Step 3: Build binary to ensure it compiles
-    print_step "Building d binary..."
-    go build -o d ./cmd/d
+    print_step "Building dw binary..."
+    go build -o dw ./cmd/dw
     print_success "Build successful"
 
     # Step 4: Create and push tag
@@ -244,7 +244,7 @@ main() {
     echo "  https://github.com/${REPO_ORG}/${REPO_NAME}/releases/tag/${NEW_VERSION}"
     echo ""
     echo "Or install with Go:"
-    echo "  go install github.com/${REPO_ORG}/${REPO_NAME}/cmd/d@${NEW_VERSION}"
+    echo "  go install github.com/${REPO_ORG}/${REPO_NAME}/cmd/dw@${NEW_VERSION}"
     echo ""
 }
 
