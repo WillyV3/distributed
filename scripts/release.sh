@@ -87,6 +87,14 @@ generate_changelog() {
     local fixes=""
     local other=""
 
+    # Check if from_tag exists, if not use all commits
+    local log_range
+    if git rev-parse "${from_tag}" >/dev/null 2>&1; then
+        log_range="${from_tag}..HEAD"
+    else
+        log_range="HEAD"
+    fi
+
     while IFS= read -r commit; do
         if [[ $commit == *"feat:"* ]] || [[ $commit == *"add:"* ]] || [[ $commit == *"Add"* ]]; then
             features="${features}- ${commit}\n"
@@ -95,7 +103,7 @@ generate_changelog() {
         else
             other="${other}- ${commit}\n"
         fi
-    done < <(git log ${from_tag}..HEAD --pretty=format:"%s" --no-merges)
+    done < <(git log ${log_range} --pretty=format:"%s" --no-merges)
 
     if [[ -n $features ]]; then
         echo "### Features"
@@ -113,7 +121,10 @@ generate_changelog() {
     fi
 
     echo ""
-    echo "**Full Changelog**: https://github.com/${REPO_ORG}/${REPO_NAME}/compare/${from_tag}...${to_tag}"
+    # Only show Full Changelog link if there's a previous tag
+    if git rev-parse "${from_tag}" >/dev/null 2>&1; then
+        echo "**Full Changelog**: https://github.com/${REPO_ORG}/${REPO_NAME}/compare/${from_tag}...${to_tag}"
+    fi
 }
 
 # Main release process
