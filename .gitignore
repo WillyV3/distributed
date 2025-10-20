@@ -1,0 +1,43 @@
+# Binaries
+d
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dist/
+build/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local development
+.claude/
+old-scripts/
+*.sh
+!scripts/*.sh
+
+# Temp docs
+QUICKSTART.md
+SPINNERS.md
