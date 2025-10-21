@@ -50,9 +50,11 @@ load=$(uptime | sed "s/.*load average[s]*: //" | awk "{print \$1}" | tr -d ",")
 if [[ "$OSTYPE" == "darwin"* ]]; then
     cpus=$(sysctl -n hw.ncpu)
     mem_total=$(sysctl -n hw.memsize)
-    mem_free=$(vm_stat | grep "Pages free" | awk "{print \$3}" | tr -d ".")
     page_size=$(vm_stat | grep "page size" | awk "{print \$8}")
-    mem_used=$((mem_total - (mem_free * page_size)))
+    pages_wired=$(vm_stat | grep "Pages wired" | awk "{print \$4}" | tr -d ".")
+    pages_active=$(vm_stat | grep "Pages active" | awk "{print \$3}" | tr -d ".")
+    pages_compressed=$(vm_stat | grep "occupied by compressor" | awk "{print \$5}" | tr -d ".")
+    mem_used=$(( (pages_wired + pages_active + pages_compressed) * page_size ))
     mem_pct=$((mem_used * 100 / mem_total))
 else
     cpus=$(nproc)
