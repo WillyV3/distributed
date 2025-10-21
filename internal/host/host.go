@@ -52,9 +52,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     mem_total=$(sysctl -n hw.memsize)
     page_size=$(vm_stat | grep "page size" | awk "{print \$8}")
     pages_wired=$(vm_stat | grep "Pages wired" | awk "{print \$4}" | tr -d ".")
-    pages_active=$(vm_stat | grep "Pages active" | awk "{print \$3}" | tr -d ".")
     pages_compressed=$(vm_stat | grep "occupied by compressor" | awk "{print \$5}" | tr -d ".")
-    mem_used=$(( (pages_wired + pages_active + pages_compressed) * page_size ))
+    mem_used=$(( (pages_wired + pages_compressed) * page_size ))
     mem_pct=$((mem_used * 100 / mem_total))
 else
     cpus=$(nproc)
