@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -40,7 +39,6 @@ func main() {
 	rootCmd.AddCommand(loadCmd())
 	rootCmd.AddCommand(syncCmd())
 	rootCmd.AddCommand(runCmd())
-	rootCmd.AddCommand(tmuxCmd())
 	rootCmd.AddCommand(configCmd())
 
 	if err := rootCmd.Execute(); err != nil {
@@ -192,49 +190,6 @@ func runCmd() *cobra.Command {
 
 			ui.Info(fmt.Sprintf("Running on %s (score: %.2f)", best.Host, best.Score))
 			return run.OnHost(best.Host, command)
-		},
-	}
-}
-
-func tmuxCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "tmux [host]",
-		Short: "Sync current dir and attach to tmux",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			targetHost := args[0]
-
-			// Sync current directory
-			ui.Info("Syncing current directory")
-			if err := sync.Push(".", []string{targetHost}, false); err != nil {
-				return err
-			}
-			ui.Success("Sync complete")
-
-			// Get current working directory (relative to home)
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-
-			remotePath := strings.Replace(cwd, home, "~", 1)
-
-			ui.Info(fmt.Sprintf("Connecting to %s", targetHost))
-
-			// SSH and attach to tmux
-			tmuxCmd := fmt.Sprintf("cd %s && (TERM=xterm-256color tmux attach-session -t dev 2>/dev/null || TERM=xterm-256color tmux new-session -s dev)", remotePath)
-
-			sshCmd := exec.Command("ssh", "-t", targetHost, tmuxCmd)
-			sshCmd.Stdin = os.Stdin
-			sshCmd.Stdout = os.Stdout
-			sshCmd.Stderr = os.Stderr
-
-			return sshCmd.Run()
 		},
 	}
 }

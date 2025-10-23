@@ -13,7 +13,6 @@ CLI that reads your SSH config, checks machine load, and distributes work intell
 - Finds the least-loaded machine automatically
 - Syncs files via rsync
 - Runs commands over SSH
-- Opens tmux sessions on remote machines
 
 Pure Unix tools. No daemons, no APIs, no complexity.
 
@@ -37,7 +36,6 @@ dw status              # Check which hosts are online
 dw load                # Show CPU/memory load across hosts
 dw sync .              # Sync current directory to remote hosts
 dw run go build        # Run command on least-loaded machine
-dw tmux homelab        # Open tmux session with synced files
 ```
 
 ## Configuration
@@ -96,17 +94,6 @@ dw run --all "git pull"           # Runs on all machines
 dw run --host homelab go build    # Runs on specific host
 ```
 
-### dw tmux [host]
-Sync current directory and attach to tmux session on remote host.
-
-Example:
-```bash
-cd ~/projects/myapp
-dw tmux homelab
-# Now in tmux on homelab at ~/projects/myapp
-# Files already synced, ready to work
-```
-
 ## Examples
 
 Heavy build:
@@ -122,23 +109,15 @@ dw sync ~/projects/myapp
 dw run --all "cd ~/projects/myapp && go test ./..."
 ```
 
-Remote development:
-```bash
-cd ~/projects/vinw
-dw tmux homelab
-```
-
 ## Requirements
 
 Local machine:
 - SSH client
 - rsync
-- tmux (optional, for tmux command)
 
 Remote machines:
 - SSH server
 - rsync
-- tmux (optional)
 
 ## Security
 
